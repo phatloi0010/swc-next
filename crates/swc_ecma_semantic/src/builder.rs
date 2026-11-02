@@ -1498,6 +1498,9 @@ impl<'a> Visit<'a> for SemanticBuilder<'_, 'a> {
         let type_position = self.enter_type_position();
         self.enter_ts_lookup_view(node.node_id(), ScopeKind::TsTypeParameters);
         self.enter_node(node.node_id());
+        if !self.check_syntax.is_empty() {
+            ts::check_ts_type_parameter_declaration(self, node);
+        }
         node.visit_children_with(self);
         self.exit_ts_lookup_view(node.node_id());
         self.leave_node(NodeKindData::TsTypeParameterDeclaration(node));

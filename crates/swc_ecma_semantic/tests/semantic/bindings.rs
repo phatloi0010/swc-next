@@ -1380,3 +1380,51 @@ fn hoisting_variables() {
         assert!(has_errors);
     }
 }
+
+#[test]
+fn duplicate_type_parameters() {
+    let allocator = Allocator::new();
+    let ts_module = ts_module_options();
+
+    {
+        let parse = Parser::init(
+            &allocator,
+            "type T<A, A> = A;",
+            ts_module,
+            NoTokenParserConfig,
+        )
+        .parse();
+        assert!(parse.diagnostics.is_empty());
+        let ast = &parse.ast;
+        let unchecked = analyze(
+            ast,
+            AnalyzeOptions {
+                check_syntax: SyntaxChecks::empty(),
+            },
+        );
+        assert!(unchecked.diagnostics.is_empty());
+
+        let diagnostics = check_syntax(ast, SyntaxChecks::all());
+        assert_eq!(diagnostics.len(), 1);
+        assert_eq!(diagnostics[0].span, Span::new(10, 11));
+    }
+
+    let errors = |source| has_syntax_diagnostics(&allocator, source, ts_module);
+
+    assert!(errors("type T<A, A> = A;"));
+    assert!(errors("function f<A, A>() {}"));
+    assert!(errors("class C<A, A> {}"));
+    assert!(errors("interface I<A, A> {}"));
+    assert!(errors("type F = <A, A>(x: A) => A;"));
+    assert!(errors("type C = new <A, A>() => A;"));
+    assert!(errors("const f = <A, A>(x: A) => x;"));
+    assert!(errors("interface I { m<A, A>(): void }"));
+
+    assert!(!errors("type Ok<A, B = A> = A | B;"));
+    assert!(!errors("function ok<A, B>(a: A, b: B) {}"));
+    assert!(!errors("class C<A> { m<A>(): void {} }"));
+    assert!(!errors("function f<A>() { function g<A>() {} }"));
+    assert!(!errors(
+        "type X<T> = T extends [infer U, infer U] ? U : never;"
+    ));
+}

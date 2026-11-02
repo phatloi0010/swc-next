@@ -578,3 +578,36 @@ pub(super) fn check_parameter_property(
         );
     }
 }
+
+pub(super) fn check_ts_type_parameter_declaration(
+    builder: &mut SemanticBuilder<'_, '_>,
+    declaration: TsTypeParameterDeclaration,
+) {
+    if !builder.check_syntax.redeclarations() || !builder.ast.is_ts() {
+        return;
+    }
+    let tree = builder.ast;
+    let params = declaration.params(tree);
+    for index in 1..params.len() {
+        let param = params.get_node(tree, index).expect("type parameter exists");
+        let name_node = param.name(tree);
+        let name = tree.get_utf8(name_node.name(tree)).as_bytes();
+        for previous_index in 0..index {
+            let previous = params
+                .get_node(tree, previous_index)
+                .expect("type parameter exists");
+            let previous_name_node = previous.name(tree);
+            let previous_name = tree.get_utf8(previous_name_node.name(tree)).as_bytes();
+            if name == previous_name {
+                builder.report_redeclaration(
+                    tree,
+                    name,
+                    name_node.node_id(),
+                    previous_name_node.node_id(),
+                    SymbolFlags::TYPE_PARAMETER,
+                );
+                break;
+            }
+        }
+    }
+}
