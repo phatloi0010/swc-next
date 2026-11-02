@@ -660,3 +660,49 @@ fn expando_receiver_identity() {
         assert_eq!(root.symbol, semantic.binding(ScopeId::MODULE, b"C"));
     }
 }
+
+#[test]
+fn override_without_extends_syntax_check() {
+    let allocator = Allocator::new();
+    let ts_module = ts_module_options();
+
+    {
+        let source = "class C { override m() {} }";
+        let parse = Parser::init(&allocator, source, ts_module, NoTokenParserConfig).parse();
+        assert!(parse.diagnostics.is_empty());
+        let ast = &parse.ast;
+        let statement = ast.root_program().body(ast).get_node(ast, 0).unwrap();
+        let declaration = statement.as_declaration(ast).unwrap();
+        let class = declaration.as_class(ast).unwrap();
+        let element = class.body(ast).body(ast).get_node(ast, 0).unwrap();
+        let method = element.as_method_definition(ast).unwrap();
+
+        let unchecked = analyze(
+            ast,
+            AnalyzeOptions {
+                check_syntax: SyntaxChecks::empty(),
+            },
+        );
+        assert!(unchecked.diagnostics.is_empty());
+
+        let checked = check_syntax(ast, SyntaxChecks::all());
+        assert_eq!(checked.len(), 1);
+        assert_eq!(checked[0].span, ast.span(method.node_id()));
+    }
+
+    let errors = |source| has_syntax_diagnostics(&allocator, source, ts_module);
+
+    assert!(errors("class C { override m() {} }"));
+    assert!(errors("class C { override x = 1; }"));
+    assert!(errors("class C { override get x() { return 1; } }"));
+    assert!(errors("class C { static override m() {} }"));
+    assert!(errors("class C { constructor(override x: number) {} }"));
+    assert!(errors("abstract class C { abstract override m(): void; }"));
+    assert!(errors("const C = class { override m() {} };"));
+
+    assert!(!errors(
+        "class B { m() {} }\nclass C extends B { override m() {} }"
+    ));
+    assert!(!errors("class C { m() {} }"));
+    assert!(!errors("class C { override constructor() {} }"));
+}

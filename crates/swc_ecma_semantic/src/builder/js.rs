@@ -1060,6 +1060,15 @@ pub(super) fn check_class_body(builder: &mut SemanticBuilder<'_, '_>, body: Clas
     if !builder.check_syntax.class_body() {
         return;
     }
+    let class_without_extends = if builder.ast.is_ts()
+        && let Some(parent) = builder.parent()
+        && let NodeKindData::Class(class) = builder.ast.kind_data(parent)
+        && class.super_class(builder.ast).is_none()
+    {
+        Some(class)
+    } else {
+        None
+    };
     let children = body.body(builder.ast);
     let mut first_constructor = None;
     for index in 0..children.len() {
@@ -1069,6 +1078,9 @@ pub(super) fn check_class_body(builder: &mut SemanticBuilder<'_, '_>, body: Clas
             .node_id();
         if builder.check_syntax.class_member_names() {
             check_class_member_name(builder, child);
+        }
+        if let Some(class) = class_without_extends {
+            check_class_member_override(builder, class, child);
         }
         // TypeScript permits constructor overload declarations and leaves duplicate
         // implementation diagnostics to its type checker.
@@ -1702,4 +1714,71 @@ impl<'traverse, 'a> SemanticBuilder<'traverse, 'a> {
             },
         );
     }
+}
+
+fn check_class_member_override(
+    builder: &mut SemanticBuilder<'_, '_>,
+    class: Class,
+    node: NodeId,
+) {
+    let tree = builder.ast;
+    match tree.kind_data(node) {
+        NodeKindData::PropertyDefinition(property) => {
+            if property.r#override(tree) {
+                report_override_without_extends(builder, class, node);
+            }
+        }
+        NodeKindData::MethodDefinition(method) => {
+            if method.kind(tree) == swc_next_ecma_ast::MethodDefinitionKind::Constructor {
+                let params = method.value(tree).params(tree);
+                check_constructor_parameter_overrides(builder, class, params);
+            } else if method.r#override(tree) {
+                report_override_without_extends(builder, class, node);
+            }
+        }
+        NodeKindData::TsMethodDefinition(method) => {
+            if method.kind(tree) == swc_next_ecma_ast::MethodDefinitionKind::Constructor {
+                let params = method.value(tree).params(tree);
+                check_constructor_parameter_overrides(builder, class, params);
+            } else if method.r#override(tree) {
+                report_override_without_extends(builder, class, node);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn check_constructor_parameter_overrides(
+    builder: &mut SemanticBuilder<'_, '_>,
+    class: Class,
+    params: FormalParameters,
+) {
+    let tree = builder.ast;
+    for item in params.items(tree).iter() {
+        let item = tree.get_node_in_sub_range(item);
+        if let swc_next_ecma_ast::FormalParameterItemData::TsParameterProperty(property) =
+            tree.formal_parameter_item_data(item)
+            && property.r#override(tree)
+        {
+            report_override_without_extends(builder, class, property.node_id());
+        }
+    }
+}
+
+fn report_override_without_extends(
+    builder: &mut SemanticBuilder<'_, '_>,
+    class: Class,
+    node: NodeId,
+) {
+    let tree = builder.ast;
+    let message = match class.id(tree) {
+        Some(id) => builder.fmt(format_args!(
+            "This member cannot have an 'override' modifier because its containing class '{}' does not extend another class.",
+            tree.get_utf8(id.name(tree))
+        )),
+        None => String::from(
+            "This member cannot have an 'override' modifier because its containing class does not extend another class.",
+        ),
+    };
+    builder.report(tree.span(node), message, ReportOptions::default());
 }
