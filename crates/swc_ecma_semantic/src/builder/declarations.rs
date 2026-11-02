@@ -77,7 +77,8 @@ impl<'traverse, 'a> SemanticBuilder<'traverse, 'a> {
                 && let Some(parameters) = find_formal_parameters(self)
             {
                 let kind = parameters.kind(self.ast);
-                let must_be_unique = self.is_strict()
+                let must_be_unique = self.ast.is_ts()
+                    || self.is_strict()
                     || matches!(
                         kind,
                         swc_next_ecma_ast::FormalParameterKind::UniqueFormalParameters

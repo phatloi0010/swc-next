@@ -1380,3 +1380,74 @@ fn hoisting_variables() {
         assert!(has_errors);
     }
 }
+
+#[test]
+fn typescript_duplicate_parameters() {
+    let allocator = Allocator::new();
+    let ts_script = Options {
+        lang: Lang::Ts,
+        source_type: SourceType::Script,
+        ..Options::default()
+    };
+    let ts_module = ts_module_options();
+    let js_script = Options {
+        lang: Lang::Js,
+        source_type: SourceType::Script,
+        ..Options::default()
+    };
+
+    {
+        let parse = Parser::init(
+            &allocator,
+            "function f(x: number, x: string) {}",
+            ts_script,
+            NoTokenParserConfig,
+        )
+        .parse();
+        assert!(parse.diagnostics.is_empty());
+        let ast = &parse.ast;
+        let unchecked = analyze(
+            ast,
+            AnalyzeOptions {
+                check_syntax: SyntaxChecks::empty(),
+            },
+        );
+        assert!(unchecked.diagnostics.is_empty());
+
+        let diagnostics = check_syntax(ast, SyntaxChecks::all());
+        assert_eq!(diagnostics.len(), 1);
+        assert_eq!(diagnostics[0].span, Span::new(22, 23));
+    }
+
+    {
+        let errors = |source| has_syntax_diagnostics(&allocator, source, ts_script);
+
+        assert!(errors("function f(x: number, x: string) {}"));
+        assert!(errors("declare function f(x: number, x: string): void;"));
+        assert!(errors("type T = (x: A, x: B) => void;"));
+        assert!(errors("interface I { (x: A, x: B): void }"));
+        assert!(errors("interface I { m(x: A, x: B): void }"));
+        assert!(errors("type T = new (x: A, x: B) => void;"));
+        assert!(errors("\"use strict\"; function f(x: number, x: string) {}"));
+        assert!(errors("const f = (x: A, x: B) => {};"));
+        assert!(errors("class C { m(x: A, x: B) {} }"));
+
+        assert!(!errors("function f(x: number, y: string) {}"));
+        assert!(!errors("type Ok = (x: A, y: B) => void;"));
+    }
+
+    {
+        let errors = |source| has_syntax_diagnostics(&allocator, source, ts_module);
+
+        assert!(errors("export function f(x: number, x: string) {}"));
+        assert!(errors("export type T = (x: A, x: B) => void;"));
+        assert!(errors("export interface I { m(x: A, x: B): void }"));
+    }
+
+    {
+        let errors = |source| has_syntax_diagnostics(&allocator, source, js_script);
+
+        assert!(!errors("function f(x, x) {}"));
+        assert!(errors("\"use strict\"; function f(x, x) {}"));
+    }
+}
