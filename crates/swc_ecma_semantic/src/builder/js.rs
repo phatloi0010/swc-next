@@ -1,7 +1,7 @@
 use swc_next_ecma_ast::{
     AwaitExpression, BinaryExpression, BreakStatement, ContinueStatement, LabelIdentifier,
-    LabeledStatement, NumericLiteral, ObjectExpression, RegExpLiteral, StringLiteral,
-    YieldExpression,
+    LabeledStatement, Lang, NumericLiteral, ObjectExpression, RegExpLiteral, SourceType,
+    StringLiteral, YieldExpression,
 };
 
 use super::*;
@@ -1606,10 +1606,14 @@ impl<'traverse, 'a> SemanticBuilder<'traverse, 'a> {
             return;
         };
         let message = match self.ast.node_kind(parent) {
-            NodeKind::Program if !self.ast.is_module() => Some(self.fmt(format_args!(
-                "Cannot use {} outside a module",
-                out_of_module_label
-            ))),
+            NodeKind::Program
+                if !self.ast.is_module() && !is_allowed_in_ts_commonjs(self.ast, node) =>
+            {
+                Some(self.fmt(format_args!(
+                    "Cannot use {} outside a module",
+                    out_of_module_label
+                )))
+            }
             NodeKind::Program | NodeKind::TsModuleBlock => None,
             _ => Some(self.fmt(format_args!(
                 "{} may only appear at the top level",
@@ -1701,5 +1705,46 @@ impl<'traverse, 'a> SemanticBuilder<'traverse, 'a> {
                 ..ReportOptions::default()
             },
         );
+    }
+}
+
+fn is_allowed_in_ts_commonjs(tree: &Ast<'_>, node: NodeId) -> bool {
+    if !tree.is_ts() || tree.source_type() != SourceType::CommonJs {
+        return false;
+    }
+    if tree.lang() == Lang::Dts {
+        return true;
+    }
+    match tree.kind_data(node) {
+        NodeKindData::ImportDeclaration(declaration) => {
+            declaration.import_kind(tree) == ImportOrExportKind::Type
+        }
+        NodeKindData::ExportNamedDeclaration(declaration) => {
+            if declaration.export_kind(tree) == ImportOrExportKind::Type {
+                return true;
+            }
+            let Some(declaration) = declaration.declaration(tree) else {
+                return false;
+            };
+            match tree.kind_data(declaration.node_id()) {
+                NodeKindData::TsTypeAliasDeclaration(_)
+                | NodeKindData::TsInterfaceDeclaration(_) => true,
+                NodeKindData::VariableDeclaration(node) => node.declare(tree),
+                NodeKindData::Class(node) => node.declare(tree),
+                NodeKindData::TsFunction(node) => node.declare(tree),
+                NodeKindData::TsEnumDeclaration(node) => node.declare(tree),
+                NodeKindData::TsModuleDeclaration(node) => node.declare(tree),
+                NodeKindData::TsGlobalDeclaration(node) => node.declare(tree),
+                _ => false,
+            }
+        }
+        NodeKindData::ExportDefaultDeclaration(declaration) => matches!(
+            tree.export_default_declaration_kind_data(declaration.declaration(tree)),
+            ExportDefaultDeclarationKindData::TsInterfaceDeclaration(_)
+        ),
+        NodeKindData::ExportAllDeclaration(declaration) => {
+            declaration.export_kind(tree) == ImportOrExportKind::Type
+        }
+        _ => false,
     }
 }

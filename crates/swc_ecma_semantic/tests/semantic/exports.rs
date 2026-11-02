@@ -958,3 +958,74 @@ fn default_export() {
         assert!(!has_errors);
     }
 }
+
+#[test]
+fn commonjs_module_syntax() {
+    let allocator = Allocator::new();
+    let ts_commonjs = Options {
+        source_type: SourceType::CommonJs,
+        ..ts_module_options()
+    };
+    let dts_commonjs = Options {
+        source_type: SourceType::CommonJs,
+        ..dts_module_options()
+    };
+    let js_commonjs = Options {
+        lang: Lang::Js,
+        source_type: SourceType::CommonJs,
+        ..Options::default()
+    };
+
+    {
+        let errors = |source| has_syntax_diagnostics(&allocator, source, ts_commonjs);
+
+        assert!(!errors("import type { T } from \"a\";"));
+        assert!(!errors("import type T from \"a\";"));
+        assert!(!errors("import type * as ns from \"a\";"));
+        assert!(!errors("export type T = number;"));
+        assert!(!errors("export interface I {}"));
+        assert!(!errors("export default interface I {}"));
+        assert!(!errors("export type { T }; type T = number;"));
+        assert!(!errors("export type { T } from \"a\";"));
+        assert!(!errors("export type * from \"a\";"));
+        assert!(!errors("export type * as ns from \"a\";"));
+        assert!(!errors("export declare const x: number;"));
+        assert!(!errors("export declare function f(): void;"));
+        assert!(!errors("export declare class C {}"));
+        assert!(!errors("export declare enum E {}"));
+        assert!(!errors("export declare namespace N {}"));
+        assert!(!errors("import fs = require(\"fs\"); export = fs;"));
+
+        assert!(errors("import x from \"a\";"));
+        assert!(errors("import \"a\";"));
+        assert!(errors("import { type T } from \"a\";"));
+        assert!(errors("export const x = 1;"));
+        assert!(errors("export function f() {}"));
+        assert!(errors("export class C {}"));
+        assert!(errors("export default 1;"));
+        assert!(errors("export {};"));
+        assert!(errors("type T = number; export { type T };"));
+        assert!(errors("export * from \"a\";"));
+    }
+
+    {
+        let errors = |source| has_syntax_diagnostics(&allocator, source, dts_commonjs);
+
+        assert!(!errors("import { x } from \"a\";"));
+        assert!(!errors("export declare const x: number;"));
+        assert!(!errors("export declare function f(): void;"));
+        assert!(!errors("export const x: number;"));
+        assert!(!errors("export {};"));
+        assert!(!errors("export { x } from \"a\";"));
+        assert!(!errors("export * from \"a\";"));
+        assert!(!errors("export default x; declare const x: number;"));
+    }
+
+    {
+        let errors = |source| has_syntax_diagnostics(&allocator, source, js_commonjs);
+
+        assert!(errors("import x from \"a\";"));
+        assert!(errors("export {};"));
+        assert!(errors("export const x = 1;"));
+    }
+}
